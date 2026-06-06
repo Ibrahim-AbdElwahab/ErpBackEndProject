@@ -8,34 +8,32 @@ use Illuminate\Http\Request;
 
 class ProductController extends Controller
 {
-    // جلب كل الأصناف مع اسم التصنيف بتاعها
     public function index()
     {
-        $products = Product::with('category')->get();
-        return response()->json([
-            'status' => 'success',
-            'data' => $products
-        ]);
+        return response()->json(Product::all(), 200);
     }
 
-    // إضافة صنف جديد للمخزن
     public function store(Request $request)
     {
+        // 1. التحقق من البيانات الأساسية
         $request->validate([
-            'category_id' => 'required|exists:categories,id',
             'name' => 'required|string|max:255',
-            'barcode' => 'nullable|string|unique:products,barcode',
-            'purchase_price' => 'required|numeric|min:0',
-            'selling_price' => 'required|numeric|min:0',
-            'stock_quantity' => 'required|integer|min:0',
+            'category_id' => 'required|integer',
+            'purchase_price' => 'required|numeric',
         ]);
 
-        $product = Product::create($request->all());
+        // 2. تجهيز البيانات
+        $data = $request->all();
+
+        // 3. ربط السعر (الفرونت بيبعت sale_price، الداتا بيز بتطلب selling_price)
+        $data['selling_price'] = $request->input('sale_price', 0);
+
+        // 4. الحفظ
+        $product = Product::create($data);
 
         return response()->json([
-            'status' => 'success',
             'message' => 'تم إضافة الصنف بنجاح',
-            'data' => $product
+            'product' => $product
         ], 201);
     }
 }

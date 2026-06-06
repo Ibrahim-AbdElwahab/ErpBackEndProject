@@ -6,7 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class ReturnInvoice extends Model
 {
-    protected $fillable = ['user_id', 'client_id', 'total_amount', 'return_type'];
+    // شيلنا الـ fillable وحطينا guarded عشان يسمح بتسجيل كل الحقول الجديدة (زي المورد والفلوس)
+    protected $guarded = [];
 
     public function items()
     {
@@ -16,5 +17,11 @@ class ReturnInvoice extends Model
     public function client()
     {
         return $this->belongsTo(Client::class);
+    }
+
+    // ضفنا العلاقة دي عشان لو المرتجع رايح لشركة/مورد
+    public function supplier()
+    {
+        return $this->belongsTo(Supplier::class);
     }
 }

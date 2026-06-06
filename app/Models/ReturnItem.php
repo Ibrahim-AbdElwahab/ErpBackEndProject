@@ -6,7 +6,12 @@ use Illuminate\Database\Eloquent\Model;
 
 class ReturnItem extends Model
 {
-    protected $fillable = ['return_invoice_id', 'product_id', 'quantity', 'price', 'subtotal'];
+    protected $guarded = [];
+
+    public function invoice()
+    {
+        return $this->belongsTo(ReturnInvoice::class);
+    }
 
     public function product()
     {

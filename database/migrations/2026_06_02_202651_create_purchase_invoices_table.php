@@ -11,13 +11,12 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('return_items', function (Blueprint $table) {
+        Schema::create('purchase_invoices', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('return_invoice_id');
-            $table->foreignId('product_id');
-            $table->integer('quantity');
-            $table->decimal('price', 10, 2); // سعر المرتجع
-            $table->decimal('subtotal', 10, 2);
+            $table->foreignId('supplier_id')->nullable();
+            $table->decimal('total_amount', 10, 2);
+            $table->decimal('paid_amount', 10, 2)->default(0);
+            $table->foreignId('user_id');
             $table->timestamps();
         });
     }
@@ -27,6 +26,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('return_items');
+        Schema::dropIfExists('purchase_invoices');
     }
 };

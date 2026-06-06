@@ -13,4 +13,5 @@ class Client extends Model
     {
         return $this->hasMany(SaleInvoice::class);
     }
+    protected $guarded = [];
 }

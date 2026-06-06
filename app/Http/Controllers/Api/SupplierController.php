@@ -5,8 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Supplier;
 use App\Models\DrawerTransaction;
+use App\Models\PurchaseInvoice;
+use App\Models\ReturnInvoice;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class SupplierController extends Controller
 {
@@ -20,14 +21,13 @@ class SupplierController extends Controller
         ]);
     }
 
-    // 2. إضافة مورد جديد (الشركات اللي بتجيب منها بضاعة)
+    // 2. حفظ مورد جديد
     public function store(Request $request)
     {
         $request->validate([
             'name' => 'required|string|max:255',
-            'company_name' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:20',
-            'balance' => 'numeric' // الرصيد اللي ليه أو عليه
+            'balance' => 'numeric'
         ]);
 
         $supplier = Supplier::create($request->all());
@@ -39,43 +39,143 @@ class SupplierController extends Controller
         ], 201);
     }
 
-    // 3. تسجيل دفعة صادرة (إنت بتسدد فلوس للمورد من اللي عليك)
+    // 3. تسجيل دفعة نقدية طالعة مننا للمورد
     public function pay(Request $request, $id)
     {
         $request->validate([
             'amount' => 'required|numeric|min:1'
         ]);
 
-        try {
-            DB::beginTransaction();
+        $supplier = Supplier::findOrFail($id);
+        $supplier->balance -= $request->amount;
+        $supplier->save();
 
-            $supplier = Supplier::findOrFail($id);
+        DrawerTransaction::create([
+            'user_id' => 1,
+            'type' => 'out',
+            'amount' => $request->amount,
+            'description' => "دفعة مسددة للمورد: {$supplier->name}",
+        ]);
 
-            // إنت بتسددله، يعني رصيده (اللي كان بالسالب كدين عليك) هيزيد ويقرب للصفر
-            $supplier->balance += $request->amount;
-            $supplier->save();
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم صرف الدفعة من الخزنة بنجاح',
+            'new_balance' => $supplier->balance
+        ]);
+    }
 
-            // الفلوس دي هتخرج من الدرج/الخزنة
-            DrawerTransaction::create([
-                'user_id' => 1, // مؤقتاً
-                'type' => 'out', // ركز هنا: الفلوس خارجة من المحل
-                'amount' => $request->amount,
-                'description' => "دفعة مسددة للمورد: {$supplier->name}",
-            ]);
+    // 4. التعديل وإشعارات التسوية للموردين (الجوكر)
+    public function update(Request $request, $id)
+    {
+        $supplier = Supplier::findOrFail($id);
 
-            DB::commit();
+        $supplier->name = $request->name ?? $supplier->name;
+        $supplier->phone = $request->phone ?? $supplier->phone;
 
-            return response()->json([
-                'status' => 'success',
-                'message' => 'تم سحب الدفعة من الخزنة وتسديدها للمورد بنجاح',
-                'data' => $supplier
-            ]);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage()
-            ], 400);
+        if ($request->filled('adjustment_amount') && $request->adjustment_amount > 0) {
+            $amount = $request->adjustment_amount;
+            $note = $request->adjustment_note ?? 'تسوية حساب';
+
+            if ($request->adjustment_type === 'discount') {
+                // المورد خصم لنا (الفلوس اللي ليه علينا تقل)
+                $supplier->balance -= $amount;
+                DrawerTransaction::create([
+                    'user_id' => 1,
+                    'type' => 'adjustment',
+                    'amount' => $amount,
+                    'description' => "إشعار خصم من المورد: {$supplier->name} - {$note}",
+                ]);
+            } elseif ($request->adjustment_type === 'addition') {
+                // المورد ضاف علينا مديونية (الفلوس اللي ليه علينا تزيد)
+                $supplier->balance += $amount;
+                DrawerTransaction::create([
+                    'user_id' => 1,
+                    'type' => 'adjustment',
+                    'amount' => $amount,
+                    'description' => "إشعار إضافة مديونية للمورد: {$supplier->name} - {$note}",
+                ]);
+            }
         }
+
+        $supplier->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم تعديل وتسوية حساب المورد بنجاح',
+            'data' => $supplier
+        ]);
+    }
+
+    // 5. كشف حساب المورد المتكامل
+    public function statement($id)
+    {
+        $supplier = Supplier::findOrFail($id);
+
+        $invoices = PurchaseInvoice::where('supplier_id', $id)->get()->map(function ($invoice) {
+            return [
+                'date' => $invoice->created_at->format('Y-m-d h:i A'),
+                'type' => 'فاتورة مشتريات',
+                'description' => 'فاتورة رقم #' . $invoice->id,
+                'credit' => $invoice->total_amount,
+                'debit' => $invoice->paid_amount,
+                'created_at' => $invoice->created_at
+            ];
+        });
+
+        $payments = DrawerTransaction::where('description', 'LIKE', "%دفعة مسددة للمورد: {$supplier->name}%")->get()->map(function ($payment) {
+            return [
+                'date' => $payment->created_at->format('Y-m-d h:i A'),
+                'type' => 'سداد نقدي',
+                'description' => 'دفعة مسددة من الخزنة',
+                'credit' => 0,
+                'debit' => $payment->amount,
+                'created_at' => $payment->created_at
+            ];
+        });
+
+        $returns = ReturnInvoice::where('supplier_id', $id)->get()->map(function ($ret) {
+            return [
+                'date' => $ret->created_at->format('Y-m-d h:i A'),
+                'type' => 'مرتجع مشتريات',
+                'description' => 'مرتجع رقم #' . $ret->id,
+                'credit' => 0,
+                'debit' => $ret->total_amount - $ret->paid_amount,
+                'created_at' => $ret->created_at
+            ];
+        });
+
+        // سحب إشعارات الخصم والإضافة الخاصة بالمورد
+        $adjustments = DrawerTransaction::where('type', 'adjustment')
+            ->where('description', 'LIKE', "%للمورد: {$supplier->name} -%")->get()->map(function ($adj) {
+                $isDiscount = str_contains($adj->description, 'خصم');
+                return [
+                    'date' => $adj->created_at->format('Y-m-d h:i A'),
+                    'type' => $isDiscount ? 'إشعار خصم مكسوب' : 'إشعار مديونية إضافية',
+                    'description' => $adj->description,
+                    'credit' => $isDiscount ? 0 : $adj->amount,
+                    'debit' => $isDiscount ? $adj->amount : 0,
+                    'created_at' => $adj->created_at
+                ];
+            });
+
+        $statement = collect($invoices)->merge($payments)->merge($returns)->merge($adjustments)->sortBy('created_at')->values();
+
+        $totalCredit = $statement->sum('credit');
+        $totalDebit = $statement->sum('debit');
+        $openingBalance = $supplier->balance - ($totalCredit - $totalDebit);
+
+        $runningBalance = $openingBalance;
+        $finalStatement = $statement->map(function ($item) use (&$runningBalance) {
+            $runningBalance += ($item['credit'] - $item['debit']);
+            $item['balance'] = $runningBalance;
+            return $item;
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'supplier_name' => $supplier->name,
+            'current_balance' => $supplier->balance,
+            'statement' => $finalStatement
+        ]);
     }
 }

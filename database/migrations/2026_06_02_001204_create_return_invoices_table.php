@@ -13,10 +13,12 @@ return new class extends Migration
     {
         Schema::create('return_invoices', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained(); // المحاسب اللي استلم المرتجع
-            $table->foreignId('client_id')->nullable()->constrained(); // العميل (ممكن زبون طياري)
-            $table->decimal('total_amount', 15, 2);
-            $table->enum('return_type', ['cash', 'credit'])->default('cash');
+            $table->enum('type', ['client', 'supplier']); // نوع المرتجع
+            $table->foreignId('client_id')->nullable(); // لو المرتجع لعميل
+            $table->foreignId('supplier_id')->nullable(); // لو المرتجع لمورد
+            $table->decimal('total_amount', 10, 2);
+            $table->decimal('paid_amount', 10, 2)->default(0); // الفلوس اللي ادفعت كاش وقت المرتجع
+            $table->foreignId('user_id');
             $table->timestamps();
         });
     }

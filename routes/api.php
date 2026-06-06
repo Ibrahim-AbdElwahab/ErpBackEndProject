@@ -1,32 +1,65 @@
 <?php
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ProductController;
-use App\Http\Controllers\Api\SaleInvoiceController;
-use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\ReturnController;
+use App\Http\Controllers\Api\ClientController;
+use App\Http\Controllers\Api\SaleInvoiceController;
+use App\Http\Controllers\Api\PurchaseInvoiceController; // 👈 استدعاء كنترولر المشتريات
 
-// مسار المرتجعات
-Route::post('/returns', [ReturnController::class, 'store']);
+// 🔓 مسار مفتوح للكل (عشان نقدر نسجل دخول)
+Route::post('/login', [AuthController::class, 'login']);
 
-// مسارات الموردين
-Route::get('/suppliers', [SupplierController::class, 'index']);
-Route::post('/suppliers', [SupplierController::class, 'store']);
-Route::post('/suppliers/{id}/pay', [SupplierController::class, 'pay']);
+// 🔒 مسارات محمية (لازم توكن)
+Route::middleware('auth:sanctum')->group(function () {
 
-// مسارات العملاء
-Route::get('/clients', [ClientController::class, 'index']);
-Route::post('/clients', [ClientController::class, 'store']);
-Route::post('/clients/{id}/pay', [ClientController::class, 'pay']); // مسار تسديد الدفعة
+    Route::get('/dashboard', [DashboardController::class, 'index']);
 
-// مسار إنشاء فاتورة مبيعات
-Route::post('/invoices', [SaleInvoiceController::class, 'store']);
-// مسارات التصنيفات
-Route::get('/categories', [CategoryController::class, 'index']);
-Route::post('/categories', [CategoryController::class, 'store']);
+    // المخزن
+    Route::get('/products', [ProductController::class, 'index']);
+    Route::post('/products', [ProductController::class, 'store']);
 
-// مسارات الأصناف (قطع الغيار)
-Route::get('/products', [ProductController::class, 'index']);
-Route::post('/products', [ProductController::class, 'store']);
+    // الموردين
+    Route::get('/suppliers', [SupplierController::class, 'index']);
+    Route::post('/suppliers', [SupplierController::class, 'store']);
+    Route::post('/suppliers/{id}/pay', [SupplierController::class, 'pay']);
+
+    // المرتجعات
+    Route::post('/returns', [ReturnController::class, 'store']);
+
+    // العملاء
+    Route::get('/clients', [ClientController::class, 'index']);
+    Route::post('/clients', [ClientController::class, 'store']);
+    Route::post('/clients/{id}/pay', [ClientController::class, 'pay']);
+
+    // المبيعات
+    Route::post('/invoices', [SaleInvoiceController::class, 'store']);
+
+    // المشتريات 👈 (المسار اللي كان ناقص)
+    Route::post('/purchase-invoices', [PurchaseInvoiceController::class, 'store']);
+
+    // كشف حساب العميل
+    Route::get('/clients/{id}/statement', [ClientController::class, 'statement']);
+
+    // كشف حساب المورد
+    Route::get('/suppliers/{id}/statement', [SupplierController::class, 'statement']);
+
+    Route::put('/clients/{id}', [\App\Http\Controllers\Api\ClientController::class, 'update']);
+
+    Route::put('/suppliers/{id}', [\App\Http\Controllers\Api\SupplierController::class, 'update']);
+
+    Route::get('/categories', [\App\Http\Controllers\Api\CategoryController::class, 'index']);
+    Route::post('/categories', [\App\Http\Controllers\Api\CategoryController::class, 'store']);
+    Route::put('/categories/{id}', [\App\Http\Controllers\Api\CategoryController::class, 'update']);
+
+    Route::put('/products/{id}', [\App\Http\Controllers\Api\ProductController::class, 'update']);
+
+    Route::post('/sales', [\App\Http\Controllers\Api\SaleInvoiceController::class, 'store']);
+    Route::get('/sales', [\App\Http\Controllers\Api\SaleInvoiceController::class, 'index']);
+
+    Route::get('/dashboard/stats', [\App\Http\Controllers\Api\DashboardController::class, 'index']);
+});

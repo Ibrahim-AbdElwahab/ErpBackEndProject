@@ -2,27 +2,25 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class SaleInvoice extends Model
 {
-    protected $fillable = ['user_id', 'client_id', 'total_amount', 'paid_amount'];
+    use HasFactory;
 
-    // الفاتورة فيها أصناف (عناصر) كتير
+    protected $table = 'sale_invoices';
+
+    // حطينا guarded فاضية عشان لارفل يقبل يحفظ كل الحقول براحته وميضربش إيرور fillable تاني
+    protected $guarded = [];
+
     public function items()
     {
         return $this->hasMany(InvoiceItem::class);
     }
 
-    // الفاتورة دي بتاعة عميل معين
     public function client()
     {
         return $this->belongsTo(Client::class);
-    }
-
-    // الفاتورة دي اللي عملها مستخدم (محاسب) معين
-    public function user()
-    {
-        return $this->belongsTo(User::class);
     }
 }
