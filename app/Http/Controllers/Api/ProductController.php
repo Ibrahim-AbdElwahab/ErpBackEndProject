@@ -10,30 +10,28 @@ class ProductController extends Controller
 {
     public function index()
     {
-        return response()->json(Product::all(), 200);
+        return response()->json(Product::all());
     }
 
     public function store(Request $request)
     {
-        // 1. التحقق من البيانات الأساسية
+        // 1. فك الـ Required من الـ selling_price عشان نتحكم فيه يدوياً
         $request->validate([
-            'name' => 'required|string|max:255',
-            'category_id' => 'required|integer',
+            'name' => 'required|string',
+            'category_id' => 'required',
             'purchase_price' => 'required|numeric',
         ]);
 
-        // 2. تجهيز البيانات
         $data = $request->all();
 
-        // 3. ربط السعر (الفرونت بيبعت sale_price، الداتا بيز بتطلب selling_price)
-        $data['selling_price'] = $request->input('sale_price', 0);
+        // 2. التحويل الذكي: عشان ما يضربش إيرور 1364
+        $data['selling_price'] = $request->input('sale_price', $request->purchase_price);
 
-        // 4. الحفظ
+        // 3. تأكد إن القيم دي موجودة
+        $data['stock_quantity'] = $request->stock_quantity ?? 0;
+
         $product = Product::create($data);
 
-        return response()->json([
-            'message' => 'تم إضافة الصنف بنجاح',
-            'product' => $product
-        ], 201);
+        return response()->json(['message' => 'تم الحفظ', 'product' => $product], 201);
     }
 }

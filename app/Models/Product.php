@@ -9,7 +9,6 @@ class Product extends Model
 {
     use HasFactory;
 
-    // دي الحقول اللي مسموح للـ API يكتب فيها
     protected $fillable = [
         'name',
         'category_id',
