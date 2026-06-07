@@ -8,14 +8,21 @@ use Illuminate\Http\Request;
 
 class ProductController extends Controller
 {
+    // عرض الأصناف
     public function index()
     {
-        return response()->json(Product::all());
+        $products = Product::all();
+
+        // التغليف ده مهم جداً للفرونت إند عشان ميضربش Undefined
+        return response()->json([
+            'status' => 'success',
+            'data' => $products
+        ], 200);
     }
 
+    // حفظ صنف جديد
     public function store(Request $request)
     {
-        // 1. فك الـ Required من الـ selling_price عشان نتحكم فيه يدوياً
         $request->validate([
             'name' => 'required|string',
             'category_id' => 'required',
@@ -24,14 +31,54 @@ class ProductController extends Controller
 
         $data = $request->all();
 
-        // 2. التحويل الذكي: عشان ما يضربش إيرور 1364
+        // ربط السعر الوارد من الفرونت إند بحقل الداتا بيز
         $data['selling_price'] = $request->input('sale_price', $request->purchase_price);
-
-        // 3. تأكد إن القيم دي موجودة
         $data['stock_quantity'] = $request->stock_quantity ?? 0;
 
         $product = Product::create($data);
 
-        return response()->json(['message' => 'تم الحفظ', 'product' => $product], 201);
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم الحفظ بنجاح',
+            'data' => $product
+        ], 201);
+    }
+
+    // تعديل بيانات صنف موجود
+    public function update(Request $request, $id)
+    {
+        $request->validate([
+            'name' => 'required|string',
+            'category_id' => 'required',
+            'purchase_price' => 'required|numeric',
+        ]);
+
+        $product = Product::findOrFail($id);
+        $data = $request->all();
+
+        // ربط السعر زي ما عملنا في الإضافة
+        if ($request->has('sale_price')) {
+            $data['selling_price'] = $request->sale_price;
+        }
+
+        $product->update($data);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم تعديل الصنف بنجاح',
+            'data' => $product
+        ]);
+    }
+
+    // حذف صنف
+    public function destroy($id)
+    {
+        $product = Product::findOrFail($id);
+        $product->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم حذف الصنف'
+        ]);
     }
 }
