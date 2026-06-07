@@ -84,21 +84,22 @@ class ClientController extends Controller
             $amount = $request->adjustment_amount;
             $note = $request->adjustment_note ?? 'تسوية حساب';
 
+            // في ClientController (دالة update)
             if ($request->adjustment_type === 'discount') {
                 $client->balance += $amount;
                 DrawerTransaction::create([
                     'user_id' => 1,
-                    'type' => 'adjustment',
+                    'type' => 'in', // 👈 غيرناها لـ in بدل adjustment
                     'amount' => $amount,
-                    'description' => "إشعار خصم للعميل: {$client->name} - {$note}",
+                    'description' => "تسوية (خصم) - إشعار خصم للعميل: {$client->name} - {$note}",
                 ]);
             } elseif ($request->adjustment_type === 'addition') {
                 $client->balance -= $amount;
                 DrawerTransaction::create([
                     'user_id' => 1,
-                    'type' => 'adjustment',
+                    'type' => 'out', // 👈 غيرناها لـ out بدل adjustment
                     'amount' => $amount,
-                    'description' => "إشعار إضافة مديونية للعميل: {$client->name} - {$note}",
+                    'description' => "تسوية (إضافة) - إشعار إضافة مديونية للعميل: {$client->name} - {$note}",
                 ]);
             }
         }
@@ -116,34 +117,70 @@ class ClientController extends Controller
     public function statement($id)
     {
         $client = \App\Models\Client::findOrFail($id);
-        $statement = [];
-        $balance = 0;
 
         // 1. جلب فواتير المبيعات
-        $sales = \App\Models\SaleInvoice::where('client_id', $id)->orderBy('created_at')->get();
-
-        foreach ($sales as $sale) {
-            $balance += $sale->total_amount; // زيادة المديونية
-
-            $statement[] = [
-                'id' => $sale->id,
-                'invoice_id' => $sale->id, // 👈 السطر ده هو اللي كان ناقص
-                'date' => $sale->created_at->format('Y-m-d h:i A'),
+        $sales = \App\Models\SaleInvoice::where('client_id', $id)->get()->map(function ($invoice) {
+            return [
+                'id' => $invoice->id,
+                'invoice_id' => $invoice->id,
+                'date' => $invoice->created_at,
                 'type' => 'فاتورة مبيعات',
-                'description' => 'فاتورة مبيعات رقم #' . $sale->id,
-                'debit' => $sale->total_amount, // مدين (عليه)
+                'description' => 'فاتورة مبيعات رقم #' . $invoice->id,
+                'debit' => $invoice->total_amount, // عليه
                 'credit' => 0,
-                'balance' => $balance,
             ];
-        }
+        });
 
-        // (لو عندك كود بيجيب الدفعات/السداد حطه هنا بنفس الطريقة بس الـ credit هو اللي بيزيد)
+        // 2. جلب مرتجعات المبيعات (العميل رجع بضاعة = رصيده يقل = دائن)
+        $returns = \App\Models\ReturnInvoice::where('client_id', $id)->where('type', 'client')->get()->map(function ($ret) {
+            return [
+                'id' => $ret->id,
+                'invoice_id' => $ret->id,
+                'date' => $ret->created_at,
+                'type' => 'مرتجع مبيعات',
+                'description' => 'مرتجع رقم #' . $ret->id,
+                'debit' => 0,
+                'credit' => $ret->total_amount, // دفعناله (أو خصمنا من اللي عليه)
+            ];
+        });
+
+        // 3. جلب الدفعات النقدية من الخزنة
+        $payments = \App\Models\DrawerTransaction::where('description', 'LIKE', "%العميل: {$client->name}%")
+            ->where('type', 'in')->get()->map(function ($payment) {
+                return [
+                    'id' => $payment->id,
+                    'invoice_id' => null,
+                    'date' => $payment->created_at,
+                    'type' => 'سداد نقدي',
+                    'description' => $payment->description,
+                    'debit' => 0,
+                    'credit' => $payment->amount, // دفع فلوس = دائن
+                ];
+            });
+
+        // 4. دمج وتنسيق البيانات
+        $statement = collect($sales)->merge($returns)->merge($payments)->sortBy('date')->values();
+
+        // حساب الرصيد التراكمي
+        $runningBalance = 0;
+        $finalStatement = $statement->map(function ($item) use (&$runningBalance) {
+            $runningBalance += ($item['debit'] - $item['credit']);
+            return [
+                'date' => $item['date']->format('Y-m-d h:i A'),
+                'type' => $item['type'],
+                'description' => $item['description'],
+                'debit' => $item['debit'] > 0 ? $item['debit'] : 0,
+                'credit' => $item['credit'] > 0 ? $item['credit'] : 0,
+                'balance' => $runningBalance, // الرصيد بعد الحركة
+                'invoice_id' => $item['invoice_id']
+            ];
+        });
 
         return response()->json([
             'status' => 'success',
             'client_name' => $client->name,
-            'current_balance' => $balance,
-            'statement' => $statement
+            'current_balance' => $runningBalance, // الرصيد النهائي الصحيح
+            'statement' => $finalStatement
         ]);
     }
 }

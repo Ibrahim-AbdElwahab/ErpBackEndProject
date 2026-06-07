@@ -80,7 +80,7 @@ class SupplierController extends Controller
                 $supplier->balance -= $amount;
                 DrawerTransaction::create([
                     'user_id' => 1,
-                    'type' => 'adjustment',
+                    'type' => 'in', // 👈 غيرناها لـ 'in' عشان الداتا بيز تقبلها
                     'amount' => $amount,
                     'description' => "إشعار خصم من المورد: {$supplier->name} - {$note}",
                 ]);
@@ -88,7 +88,7 @@ class SupplierController extends Controller
                 $supplier->balance += $amount;
                 DrawerTransaction::create([
                     'user_id' => 1,
-                    'type' => 'adjustment',
+                    'type' => 'out', // 👈 غيرناها لـ 'out' عشان الداتا بيز تقبلها
                     'amount' => $amount,
                     'description' => "إشعار إضافة مديونية للمورد: {$supplier->name} - {$note}",
                 ]);
