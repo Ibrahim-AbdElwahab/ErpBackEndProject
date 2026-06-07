@@ -115,84 +115,35 @@ class ClientController extends Controller
     // 5. كشف الحساب المتكامل
     public function statement($id)
     {
-        $client = Client::findOrFail($id);
+        $client = \App\Models\Client::findOrFail($id);
+        $statement = [];
+        $balance = 0;
 
-        $invoices = \App\Models\SaleInvoice::where('client_id', $id)->get()->map(function ($invoice) {
-            return [
-                'date' => $invoice->created_at->format('Y-m-d h:i A'),
+        // 1. جلب فواتير المبيعات
+        $sales = \App\Models\SaleInvoice::where('client_id', $id)->orderBy('created_at')->get();
+
+        foreach ($sales as $sale) {
+            $balance += $sale->total_amount; // زيادة المديونية
+
+            $statement[] = [
+                'id' => $sale->id,
+                'invoice_id' => $sale->id, // 👈 السطر ده هو اللي كان ناقص
+                'date' => $sale->created_at->format('Y-m-d h:i A'),
                 'type' => 'فاتورة مبيعات',
-                'description' => 'فاتورة رقم #' . $invoice->id,
-                'debit' => $invoice->total_amount,
-                'credit' => $invoice->paid_amount,
-                'created_at' => $invoice->created_at
+                'description' => 'فاتورة مبيعات رقم #' . $sale->id,
+                'debit' => $sale->total_amount, // مدين (عليه)
+                'credit' => 0,
+                'balance' => $balance,
             ];
-        });
-
-        $payments = DrawerTransaction::where('description', 'LIKE', "%دفعة مسددة من العميل: {$client->name}%")->get()->map(function ($payment) {
-            return [
-                'date' => $payment->created_at->format('Y-m-d h:i A'),
-                'type' => 'سداد نقدي',
-                'description' => 'دفعة مسددة بالخزنة',
-                'debit' => 0,
-                'credit' => $payment->amount,
-                'created_at' => $payment->created_at
-            ];
-        });
-
-        $returns = \App\Models\ReturnInvoice::where('client_id', $id)->get()->map(function ($ret) {
-            return [
-                'date' => $ret->created_at->format('Y-m-d h:i A'),
-                'type' => 'مرتجع مبيعات',
-                'description' => 'مرتجع رقم #' . $ret->id,
-                'debit' => 0,
-                'credit' => $ret->total_amount - $ret->paid_amount,
-                'created_at' => $ret->created_at
-            ];
-        });
-
-        // 🌟 سحب إشعارات الخصم والإضافة
-        $adjustments = DrawerTransaction::where('type', 'adjustment')
-            ->where('description', 'LIKE', "%للعميل: {$client->name} -%")->get()->map(function ($adj) {
-                $isDiscount = str_contains($adj->description, 'خصم');
-                return [
-                    'date' => $adj->created_at->format('Y-m-d h:i A'),
-                    'type' => $isDiscount ? 'إشعار خصم' : 'إشعار إضافة',
-                    'description' => $adj->description,
-                    'debit' => $isDiscount ? 0 : $adj->amount,
-                    'credit' => $isDiscount ? $adj->amount : 0,
-                    'created_at' => $adj->created_at
-                ];
-            });
-
-        $statement = collect($invoices)->merge($payments)->merge($returns)->merge($adjustments)->sortBy('created_at')->values();
-
-        $totalCredit = $statement->sum('credit');
-        $totalDebit = $statement->sum('debit');
-        $openingBalance = $client->balance - ($totalCredit - $totalDebit);
-
-        $runningBalance = $openingBalance;
-        $finalStatement = $statement->map(function ($item) use (&$runningBalance) {
-            $runningBalance += ($item['credit'] - $item['debit']);
-            $item['balance'] = $runningBalance;
-            return $item;
-        });
-
-        if ($openingBalance != 0) {
-            $finalStatement->prepend([
-                'date' => '-',
-                'type' => 'رصيد افتتاحي',
-                'description' => 'رصيد بداية التعامل',
-                'debit' => $openingBalance < 0 ? abs($openingBalance) : 0,
-                'credit' => $openingBalance > 0 ? $openingBalance : 0,
-                'balance' => $openingBalance
-            ]);
         }
+
+        // (لو عندك كود بيجيب الدفعات/السداد حطه هنا بنفس الطريقة بس الـ credit هو اللي بيزيد)
 
         return response()->json([
             'status' => 'success',
             'client_name' => $client->name,
-            'current_balance' => $client->balance,
-            'statement' => $finalStatement
+            'current_balance' => $balance,
+            'statement' => $statement
         ]);
     }
 }

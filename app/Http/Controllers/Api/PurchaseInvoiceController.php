@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 
 class PurchaseInvoiceController extends Controller
 {
+    // 1. حفظ الفاتورة (الكود بتاعك زي ما هو بالظبط)
     public function store(Request $request)
     {
         // 1. حساب الإجمالي
@@ -63,5 +64,36 @@ class PurchaseInvoiceController extends Controller
         }
 
         return response()->json(['message' => 'تم حفظ فاتورة المشتريات بنجاح']);
+    }
+
+    // ==========================================
+    // 2. الدالة الجديدة لعرض تفاصيل الفاتورة في المودال
+    // ==========================================
+    public function showPurchase($id)
+    {
+        // بنجيب الفاتورة ومعاها الأصناف ببيانات المنتجات
+        $invoice = PurchaseInvoice::with('items.product')->findOrFail($id);
+
+        $formattedItems = $invoice->items->map(function ($item) {
+            return [
+                'id' => $item->id,
+                'name' => $item->product ? $item->product->name : 'صنف غير متوفر',
+                'quantity' => $item->quantity,
+                // هنا ظبطنا اسم العمود بناءً على الداتا بيز بتاعتك (purchase_price)
+                'price' => $item->purchase_price ?? 0,
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'id' => $invoice->id,
+                'invoice_number' => $invoice->id,
+                'date' => $invoice->created_at->format('Y-m-d h:i A'),
+                'type' => 'فاتورة مشتريات',
+                'total_amount' => $invoice->total_amount,
+                'items' => $formattedItems
+            ]
+        ]);
     }
 }

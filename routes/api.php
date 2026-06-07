@@ -62,4 +62,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/sales', [\App\Http\Controllers\Api\SaleInvoiceController::class, 'index']);
 
     Route::get('/dashboard/stats', [\App\Http\Controllers\Api\DashboardController::class, 'index']);
+
+    // ضيف السطر ده مع باقي الروابط بتاعتك
+    Route::get('/invoices/{id}', [\App\Http\Controllers\Api\SaleInvoiceController::class, 'showInvoice']);
+
+    // متنساش تعمل use للكنترولر فوق
+
+// الراوت الجديد للمرتجعات
+Route::get('/returns/{id}', [ReturnController::class, 'showReturn']);
+
+Route::get('/purchases/{id}', [\App\Http\Controllers\Api\PurchaseInvoiceController::class, 'showPurchase']);
 });

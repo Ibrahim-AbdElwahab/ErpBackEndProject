@@ -50,14 +50,14 @@ class SaleInvoiceController extends Controller
                 'user_id' => 1,
             ]);
 
-            // ب. إضافة الأصناف (هنا التعديل الصح بتاع الـ subtotal)
+            // ب. إضافة الأصناف
             foreach ($request->items as $item) {
                 InvoiceItem::create([
                     'sale_invoice_id' => $invoice->id,
                     'product_id'      => $item['product_id'],
                     'quantity'        => $item['quantity'],
-                    'selling_price'   => $item['price'],
-                    'subtotal'        => $item['price'] * $item['quantity'], // 👈 اللغز اتحل هنا
+                    'selling_price'   => $item['price'], // بنحفظ السعر باسم selling_price
+                    'subtotal'        => $item['price'] * $item['quantity'],
                 ]);
 
                 // خصم من المخزن
@@ -100,5 +100,33 @@ class SaleInvoiceController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    // دالة جلب تفاصيل الفاتورة بالكامل (للمودال)
+    public function showInvoice($id)
+    {
+        $sale = \App\Models\SaleInvoice::with('items.product')->findOrFail($id);
+
+        $formattedItems = $sale->items->map(function ($item) {
+            return [
+                'id' => $item->id,
+                'name' => $item->product ? $item->product->name : 'صنف غير متوفر',
+                'quantity' => $item->quantity,
+                // التعديل هنا: نقرأ السعر اللي اتسجل في الداتا بيز (selling_price)
+                'price' => $item->selling_price ?? 0,
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'id' => $sale->id,
+                'invoice_number' => $sale->id,
+                'date' => $sale->created_at->format('Y-m-d h:i A'),
+                'type' => 'فاتورة مبيعات',
+                'total_amount' => $sale->total_amount,
+                'items' => $formattedItems
+            ]
+        ]);
     }
 }

@@ -64,7 +64,7 @@ class SupplierController extends Controller
         ]);
     }
 
-    // 4. التعديل وإشعارات التسوية للموردين (الجوكر)
+    // 4. التعديل وإشعارات التسوية للموردين
     public function update(Request $request, $id)
     {
         $supplier = Supplier::findOrFail($id);
@@ -77,7 +77,6 @@ class SupplierController extends Controller
             $note = $request->adjustment_note ?? 'تسوية حساب';
 
             if ($request->adjustment_type === 'discount') {
-                // المورد خصم لنا (الفلوس اللي ليه علينا تقل)
                 $supplier->balance -= $amount;
                 DrawerTransaction::create([
                     'user_id' => 1,
@@ -86,7 +85,6 @@ class SupplierController extends Controller
                     'description' => "إشعار خصم من المورد: {$supplier->name} - {$note}",
                 ]);
             } elseif ($request->adjustment_type === 'addition') {
-                // المورد ضاف علينا مديونية (الفلوس اللي ليه علينا تزيد)
                 $supplier->balance += $amount;
                 DrawerTransaction::create([
                     'user_id' => 1,
@@ -113,6 +111,8 @@ class SupplierController extends Controller
 
         $invoices = PurchaseInvoice::where('supplier_id', $id)->get()->map(function ($invoice) {
             return [
+                'id' => $invoice->id,
+                'invoice_id' => $invoice->id, // 👈 السطر ده ضروري عشان المودال يفتح المشتريات
                 'date' => $invoice->created_at->format('Y-m-d h:i A'),
                 'type' => 'فاتورة مشتريات',
                 'description' => 'فاتورة رقم #' . $invoice->id,
@@ -124,6 +124,8 @@ class SupplierController extends Controller
 
         $payments = DrawerTransaction::where('description', 'LIKE', "%دفعة مسددة للمورد: {$supplier->name}%")->get()->map(function ($payment) {
             return [
+                'id' => $payment->id,
+                'invoice_id' => null, // دي دفعة نقدية ملهاش موديل أصناف
                 'date' => $payment->created_at->format('Y-m-d h:i A'),
                 'type' => 'سداد نقدي',
                 'description' => 'دفعة مسددة من الخزنة',
@@ -135,6 +137,8 @@ class SupplierController extends Controller
 
         $returns = ReturnInvoice::where('supplier_id', $id)->get()->map(function ($ret) {
             return [
+                'id' => $ret->id,
+                'invoice_id' => $ret->id, // 👈 السطر ده ضروري للمرتجعات
                 'date' => $ret->created_at->format('Y-m-d h:i A'),
                 'type' => 'مرتجع مشتريات',
                 'description' => 'مرتجع رقم #' . $ret->id,
@@ -144,11 +148,12 @@ class SupplierController extends Controller
             ];
         });
 
-        // سحب إشعارات الخصم والإضافة الخاصة بالمورد
         $adjustments = DrawerTransaction::where('type', 'adjustment')
             ->where('description', 'LIKE', "%للمورد: {$supplier->name} -%")->get()->map(function ($adj) {
                 $isDiscount = str_contains($adj->description, 'خصم');
                 return [
+                    'id' => $adj->id,
+                    'invoice_id' => null,
                     'date' => $adj->created_at->format('Y-m-d h:i A'),
                     'type' => $isDiscount ? 'إشعار خصم مكسوب' : 'إشعار مديونية إضافية',
                     'description' => $adj->description,

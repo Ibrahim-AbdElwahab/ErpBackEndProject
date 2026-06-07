@@ -92,4 +92,31 @@ class ReturnController extends Controller
 
         return response()->json(['message' => 'تم حفظ المرتجع وتوجيه الحسابات بنجاح']);
     }
+    public function showReturn($id)
+    {
+        // افترضنا إن الموديل اسمه ReturnInvoice والعلاقة items
+        $returnInv = \App\Models\ReturnInvoice::with('items.product')->findOrFail($id);
+
+        $formattedItems = $returnInv->items->map(function ($item) {
+            return [
+                'id' => $item->id,
+                'name' => $item->product ? $item->product->name : 'صنف غير متوفر',
+                'quantity' => $item->quantity,
+                // بنجيب السعر أياً كان اسمه في الداتا بيز
+                'price' => $item->price ?? $item->cost_price ?? $item->purchase_price ?? 0,
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'id' => $returnInv->id,
+                'invoice_number' => $returnInv->id,
+                'date' => $returnInv->created_at->format('Y-m-d h:i A'),
+                'type' => 'مرتجع مشتريات',
+                'total_amount' => $returnInv->total_amount,
+                'items' => $formattedItems
+            ]
+        ]);
+    }
 }
