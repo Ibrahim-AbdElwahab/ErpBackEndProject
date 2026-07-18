@@ -11,31 +11,85 @@ use App\Models\Product;
 use App\Models\InvoiceItem;
 use App\Models\DrawerTransaction;
 use Illuminate\Http\Request;
+use Carbon\Carbon; // 👈 1. ضفنا مكتبة التعامل مع التواريخ
 
 class DashboardController extends Controller
 {
-    public function index()
+    // 👈 2. ضفنا Request عشان نستقبل التواريخ من المتصفح
+    public function index(Request $request)
     {
         try {
-            // 1. إجمالي المبيعات والمشتريات
-            $totalSales = SaleInvoice::sum('total_amount') ?? 0;
-            $totalPurchases = PurchaseInvoice::sum('total_amount') ?? 0;
+            // ==========================================
+            // 🌟 تحديد فترة الفلترة (Date Filtering Logic)
+            // ==========================================
+            $startDate = null;
+            $endDate = null;
 
-            // 2. رصيد الخزنة الحالي (الوارد - الصادر)
+            // أ. لو العميل باعت فترة جاهزة (اليوم، الأسبوع، الشهر، السنة)
+            if ($request->filled('period')) {
+                switch ($request->period) {
+                    case 'today':
+                        $startDate = Carbon::today();
+                        $endDate = Carbon::today()->endOfDay();
+                        break;
+                    case 'week':
+                        $startDate = Carbon::now()->startOfWeek();
+                        $endDate = Carbon::now()->endOfWeek();
+                        break;
+                    case 'month':
+                        $startDate = Carbon::now()->startOfMonth();
+                        $endDate = Carbon::now()->endOfMonth();
+                        break;
+                    case 'year':
+                        $startDate = Carbon::now()->startOfYear();
+                        $endDate = Carbon::now()->endOfYear();
+                        break;
+                }
+            }
+            // ب. لو العميل باعت تاريخ مخصص من وإلى (From - To)
+            elseif ($request->filled('from') && $request->filled('to')) {
+                $startDate = Carbon::parse($request->from)->startOfDay();
+                $endDate = Carbon::parse($request->to)->endOfDay();
+            }
+
+            // ==========================================
+            // 1. إجمالي المبيعات والمشتريات (مع فلترة التاريخ لو وجد)
+            // ==========================================
+            $salesQuery = SaleInvoice::query();
+            $purchasesQuery = PurchaseInvoice::query();
+
+            if ($startDate && $endDate) {
+                $salesQuery->whereBetween('created_at', [$startDate, $endDate]);
+                $purchasesQuery->whereBetween('created_at', [$startDate, $endDate]);
+            }
+
+            $totalSales = $salesQuery->sum('total_amount') ?? 0;
+            $totalPurchases = $purchasesQuery->sum('total_amount') ?? 0;
+
+            // 2. رصيد الخزنة الحالي (الرصيد التراكمي الفعلي للدرج)
             $cashIn = DrawerTransaction::where('type', 'in')->sum('amount') ?? 0;
             $cashOut = DrawerTransaction::where('type', 'out')->sum('amount') ?? 0;
             $currentDrawer = $cashIn - $cashOut;
 
-            // 3. إجمالي ديون العملاء ومستحقات الموردين
+            // 3. إجمالي ديون العملاء ومستحقات الموردين (ديون تراكمية)
             $clientsDebt = abs(Client::where('balance', '<', 0)->sum('balance')) ?? 0;
             $suppliersDebt = Supplier::where('balance', '>', 0)->sum('balance') ?? 0;
 
-            // 4. 🌟 حساب صافي الربح الحقيقي من واقع المبيعات (سعر البيع - سعر الشراء والتكلفة)
+            // ==========================================
+            // 4. 🌟 حساب صافي الربح الحقيقي (مع فلترة الفترة المحددة)
+            // ==========================================
             $netProfit = 0;
-            $soldItems = InvoiceItem::with('product')->get();
+            $soldItemsQuery = InvoiceItem::with('product');
+
+            // تطبيق فلتر التاريخ على الأصناف المباعة
+            if ($startDate && $endDate) {
+                $soldItemsQuery->whereBetween('created_at', [$startDate, $endDate]);
+            }
+
+            $soldItems = $soldItemsQuery->get();
             foreach ($soldItems as $item) {
                 if ($item->product) {
-                    // الربح للسطر = (سعر البيع الفعلي بالفاتورة - سعر شراء التكلفة الأصلي بالمخزن) * الكمية المتباعة
+                    // الربح للسطر = (سعر البيع الفعلي بالفاتورة - سعر شراء التكلفة الأصلي بالمخزن) * الكمية المباعة
                     $netProfit += ($item->selling_price - $item->product->purchase_price) * $item->quantity;
                 }
             }
@@ -45,8 +99,18 @@ class DashboardController extends Controller
             $totalProductsCount = Product::count();
             $lowStockCount = Product::where('stock_quantity', '<=', 5)->count();
 
-            // 6. 🔍 سحب كشوفات الحساب التفصيلية لزرار المودال (Drill-down Lists)
-            $salesList = SaleInvoice::with('client')->orderBy('id', 'desc')->take(15)->get()->map(function ($inv) {
+            // 6. 🔍 سحب كشوفات الحساب التفصيلية لزرار المودال (مع الفلترة لو وجد تاريخ)
+            $salesListQuery = SaleInvoice::with('client')->orderBy('id', 'desc');
+            $purchasesListQuery = PurchaseInvoice::with('supplier')->orderBy('id', 'desc');
+            $drawerListQuery = DrawerTransaction::orderBy('id', 'desc');
+
+            if ($startDate && $endDate) {
+                $salesListQuery->whereBetween('created_at', [$startDate, $endDate]);
+                $purchasesListQuery->whereBetween('created_at', [$startDate, $endDate]);
+                $drawerListQuery->whereBetween('created_at', [$startDate, $endDate]);
+            }
+
+            $salesList = $salesListQuery->take(15)->get()->map(function ($inv) {
                 return [
                     'id' => $inv->id,
                     'name' => $inv->client->name ?? 'عميل نقدي',
@@ -56,7 +120,7 @@ class DashboardController extends Controller
                 ];
             });
 
-            $purchasesList = PurchaseInvoice::with('supplier')->orderBy('id', 'desc')->take(15)->get()->map(function ($inv) {
+            $purchasesList = $purchasesListQuery->take(15)->get()->map(function ($inv) {
                 return [
                     'id' => $inv->id,
                     'name' => $inv->supplier->name ?? 'مورد نقدي',
@@ -66,7 +130,7 @@ class DashboardController extends Controller
                 ];
             });
 
-            $drawerList = DrawerTransaction::orderBy('id', 'desc')->take(15)->get()->map(function ($trans) {
+            $drawerList = $drawerListQuery->take(15)->get()->map(function ($trans) {
                 return [
                     'date' => $trans->created_at->format('Y-m-d h:i A'),
                     'type' => $trans->type == 'in' ? 'وارد للدرج' : ($trans->type == 'out' ? 'صادر / مصروف' : 'تسوية حساب'),
@@ -99,11 +163,15 @@ class DashboardController extends Controller
                     'current_drawer' => $currentDrawer,
                     'clients_debt' => $clientsDebt,
                     'suppliers_debt' => $suppliersDebt,
-                    'net_profit' => $netProfit, // الكارت الجديد
+                    'net_profit' => $netProfit,
                     'total_products_count' => $totalProductsCount,
                     'low_stock_count' => $lowStockCount,
                     'low_stock_products' => $lowStockProducts,
-                    // قوائم التفاصيل
+                    // التواريخ المفلترة حالياً عشان الفرونت إند يعرضها لو حابب
+                    'filter' => [
+                        'start_date' => $startDate ? $startDate->format('Y-m-d') : null,
+                        'end_date' => $endDate ? $endDate->format('Y-m-d') : null,
+                    ],
                     'lists' => [
                         'sales' => $salesList,
                         'purchases' => $purchasesList,

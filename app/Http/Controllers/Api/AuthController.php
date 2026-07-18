@@ -3,31 +3,140 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
+use App\Models\SaleInvoice;
+use App\Models\InvoiceItem;
+use App\Models\Product;
+use App\Models\Client;
+use App\Models\DrawerTransaction;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 
-class AuthController extends Controller
+class SaleInvoiceController extends Controller
 {
-    public function login(Request $request)
+    // 1. عرض الفواتير
+    public function index()
+    {
+        $invoices = SaleInvoice::with('items.product', 'client')->orderBy('id', 'desc')->get();
+        return response()->json([
+            'status' => 'success',
+            'data' => $invoices
+        ]);
+    }
+
+    // 2. حفظ الفاتورة (النسخة المطورة والمحمية)
+    public function store(Request $request)
     {
         $request->validate([
-            'email' => 'required|email',
-            'password' => 'required'
+            'paid_amount' => 'required|numeric|min:0',
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|exists:products,id',
+            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.price' => 'required|numeric|min:0',
         ]);
 
-        $user = User::where('email', $request->email)->first();
+        try {
+            DB::beginTransaction();
 
-        if (! $user || ! Hash::check($request->password, $user->password)) {
-            return response()->json(['message' => 'البيانات غير صحيحة، تأكد من الإيميل والباسوورد!'], 401);
+            // 🌟 1. فحص المخزون أولاً قبل أي عملية حفظ (منع البيع بالسالب مع القفل المحاسبي)
+            foreach ($request->items as $item) {
+                $product = Product::lockForUpdate()->findOrFail($item['product_id']);
+                if ($product->stock_quantity < $item['quantity']) {
+                    throw new \Exception("عفواً، رصيد الصنف ({$product->name}) غير كافٍ في المخزن! المتاح حالياً: {$product->stock_quantity}");
+                }
+            }
+
+            $totalAmount = 0;
+            foreach ($request->items as $item) {
+                $totalAmount += ($item['price'] * $item['quantity']);
+            }
+
+            // 🌟 2. استخدام أيدي المستخدم الحقيقي المسجل دخوله (أو 1 كاحتياطي في حالة عدم وجود جلسة)
+            $currentUserId = auth()->id() ?? 1;
+
+            // أ. إنشاء رأس الفاتورة
+            $invoice = SaleInvoice::create([
+                'client_id' => $request->client_id,
+                'total_amount' => $totalAmount,
+                'paid_amount' => $request->paid_amount,
+                'user_id' => $currentUserId,
+            ]);
+
+            // ب. إضافة الأصناف وخصم المخزون
+            foreach ($request->items as $item) {
+                InvoiceItem::create([
+                    'sale_invoice_id' => $invoice->id,
+                    'product_id'      => $item['product_id'],
+                    'quantity'        => $item['quantity'],
+                    'selling_price'   => $item['price'], // حفظ السعر باسم selling_price
+                    'subtotal'        => $item['price'] * $item['quantity'],
+                ]);
+
+                // خصم من المخزن بأمان
+                $product = Product::findOrFail($item['product_id']);
+                $product->stock_quantity -= $item['quantity'];
+                $product->save();
+            }
+
+            // ج. تحديث حساب العميل (لو الفاتورة آجلة أو مدفوعة جزئياً)
+            if ($request->client_id) {
+                $remaining = $totalAmount - $request->paid_amount;
+                if ($remaining > 0) {
+                    $client = Client::findOrFail($request->client_id);
+                    $client->balance -= $remaining;
+                    $client->save();
+                }
+            }
+
+            // د. إيداع الخزنة
+            if ($request->paid_amount > 0) {
+                DrawerTransaction::create([
+                    'user_id' => $currentUserId,
+                    'type' => 'in',
+                    'amount' => $request->paid_amount,
+                    'description' => "إيراد مبيعات نقدية - فاتورة رقم #" . $invoice->id,
+                ]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'تم حفظ الفاتورة بنجاح',
+                'data' => $invoice
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 422); // إرجاع كود 422 عشان الفرونت إند يفهم إنه خطأ في البيانات ويعرض الرسالة للعميل
         }
+    }
 
-        // إنشاء التوكن
-        $token = $user->createToken('erp-token')->plainTextToken;
+    // 3. دالة جلب تفاصيل الفاتورة بالكامل (للمودال)
+    public function showInvoice($id)
+    {
+        $sale = \App\Models\SaleInvoice::with('items.product')->findOrFail($id);
+
+        $formattedItems = $sale->items->map(function ($item) {
+            return [
+                'id' => $item->id,
+                'name' => $item->product ? $item->product->name : 'صنف غير متوفر',
+                'quantity' => $item->quantity,
+                'price' => $item->selling_price ?? 0,
+            ];
+        });
 
         return response()->json([
-            'token' => $token,
-            'user' => $user
+            'status' => 'success',
+            'data' => [
+                'id' => $sale->id,
+                'invoice_number' => $sale->id,
+                'date' => $sale->created_at->format('Y-m-d h:i A'),
+                'type' => 'فاتورة مبيعات',
+                'total_amount' => $sale->total_amount,
+                'items' => $formattedItems
+            ]
         ]);
     }
 }
